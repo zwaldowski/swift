@@ -31,6 +31,7 @@ class Target : NSObject, NSKeyValueObservingCustomization {
         }
     }
     dynamic var objcValue3: String
+    dynamic var objcValue4: Int
     
     // This Swift-typed property causes vtable usage on this class.
     var swiftValue: Guts
@@ -40,6 +41,7 @@ class Target : NSObject, NSKeyValueObservingCustomization {
         self.objcValue = ""
         self.objcValue2 = ""
         self.objcValue3 = ""
+        self.objcValue4 = 42
         super.init()
     }
     
@@ -59,7 +61,7 @@ class Target : NSObject, NSKeyValueObservingCustomization {
     }
     
     func print() {
-        Swift.print("swiftValue \(self.swiftValue.value), objcValue \(objcValue)")
+        Swift.print("swiftValue \(self.swiftValue.value), objc values \(objcValue), \(objcValue4)")
     }
 }
 
@@ -67,18 +69,32 @@ class Target : NSObject, NSKeyValueObservingCustomization {
 class ObserverKVO : NSObject {
     var target: Target?
     var observation: NSKeyValueObservation? = nil
+
+    var multiTarget: Target?
+    var multiObservation: NSKeyValueObservation? = nil
     
     override init() { target = nil; super.init() }
     
     func observeTarget(_ target: Target) {
         self.target = target
         observation = target.observe(\.objcValue) { (object, change) in
-            Swift.print("swiftValue \(object.swiftValue.value), objcValue \(object.objcValue)")
+            Swift.print("swiftValue \(object.swiftValue.value), objc values \(object.objcValue), \(object.objcValue4)")
+        }
+    }
+    
+    func multiObserveTarget(_ target: Target) {
+        self.multiTarget = target
+        multiObservation = target.observe([ \Target.objcValue, \Target.objcValue4 ]) { (object, change) in
+            Swift.print("swiftValue \(object.swiftValue.value), objc values \(object.objcValue), \(object.objcValue4)")
         }
     }
     
     func removeTarget() {
         observation!.invalidate()
+    }
+
+    func removeMultiTarget() {
+        multiObservation!.invalidate()
     }
 }
 
@@ -99,13 +115,22 @@ t2.objcValue3 = "nothing" //should not fire
 o2.removeTarget()
 t2.objcValue = "five" //make sure that we don't crash or keep posting changes if you deallocate an observation after invalidating it
 print("target removed")
+print("registering observer 3")
+o2.multiObserveTarget(t2)
+t2.objcValue = "nine"
+t2.objcValue4 = 9
+o2.removeMultiTarget()
+print("target removed... again")
 
 // CHECK: registering observer 2
 // CHECK-NEXT: Now witness the firepower of this fully armed and operational panopticon!
-// CHECK-NEXT: swiftValue 42, objcValue three
-// CHECK-NEXT: swiftValue 42, objcValue four
-// CHECK-NEXT: swiftValue 13, objcValue four
-// CHECK-NEXT: swiftValue 13, objcValue four
-// CHECK-NEXT: swiftValue 13, objcValue four
+// CHECK-NEXT: swiftValue 42, objc values three, 42
+// CHECK-NEXT: swiftValue 42, objc values four, 42
+// CHECK-NEXT: swiftValue 13, objc values four, 42
+// CHECK-NEXT: swiftValue 13, objc values four, 42
+// CHECK-NEXT: swiftValue 13, objc values four, 42
 // CHECK-NEXT: target removed
-
+// CHECK-NEXT: registering observer 3
+// CHECK-NEXT: swiftValue 13, objc values nine, 42
+// CHECK-NEXT: swiftValue 13, objc values nine, 9
+// CHECK-NEXT: target removed... again
