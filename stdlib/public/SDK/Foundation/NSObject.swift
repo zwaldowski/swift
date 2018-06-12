@@ -132,7 +132,7 @@ public class NSKeyValueObservation : NSObject {
     
     weak var object : NSObject?
     let callback : (NSObject, NSKeyValueObservedChange<Any>) -> Void
-    let path : String
+    let paths : [String]
     
     //workaround for <rdar://problem/31640524> Erroneous (?) error when using bridging in the Foundation overlay
     static var swizzler : NSKeyValueObservation? = {
@@ -145,21 +145,27 @@ public class NSKeyValueObservation : NSObject {
         return nil
     }()
     
-    fileprivate init(object: NSObject, keyPath: AnyKeyPath, callback: @escaping (NSObject, NSKeyValueObservedChange<Any>) -> Void) {
-        path = _bridgeKeyPathToString(keyPath)
+    fileprivate init(object: NSObject, keyPaths: [AnyKeyPath], callback: @escaping (NSObject, NSKeyValueObservedChange<Any>) -> Void) {
+        paths = keyPaths.map(_bridgeKeyPathToString)
         let _ = NSKeyValueObservation.swizzler
         self.object = object
         self.callback = callback
     }
     
     fileprivate func start(_ options: NSKeyValueObservingOptions) {
-        object?.addObserver(self, forKeyPath: path, options: options, context: nil)
+        guard let object = object else { return }
+        for path in paths {
+            object.addObserver(self, forKeyPath: path, options: options, context: nil)
+        }
     }
     
     ///invalidate() will be called automatically when an NSKeyValueObservation is deinited
     public func invalidate() {
-        object?.removeObserver(self, forKeyPath: path, context: nil)
-        object = nil
+        guard let object = object else { return }
+        for path in paths {
+            object.removeObserver(self, forKeyPath: path, context: nil)
+        }
+        self.object = nil
     }
     
     @objc func _swizzle_me_observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSString : Any]?, context: UnsafeMutableRawPointer?) {
@@ -175,7 +181,10 @@ public class NSKeyValueObservation : NSObject {
     }
     
     deinit {
-        object?.removeObserver(self, forKeyPath: path, context: nil)
+        guard let object = object else { return }
+        for path in paths {
+            object.removeObserver(self, forKeyPath: path, context: nil)
+        }
     }
 }
 
@@ -187,13 +196,26 @@ public extension _KeyValueCodingAndObserving {
             options: NSKeyValueObservingOptions = [],
             changeHandler: @escaping (Self, NSKeyValueObservedChange<Value>) -> Void)
         -> NSKeyValueObservation {
-        let result = NSKeyValueObservation(object: self as! NSObject, keyPath: keyPath) { (obj, change) in
+        let result = NSKeyValueObservation(object: self as! NSObject, keyPaths: [ keyPath ]) { (obj, change) in
             let notification = NSKeyValueObservedChange(kind: change.kind,
                                                         newValue: change.newValue as? Value,
                                                         oldValue: change.oldValue as? Value,
                                                         indexes: change.indexes,
                                                         isPrior: change.isPrior)
             changeHandler(obj as! Self, notification)
+        }
+        result.start(options)
+        return result
+    }
+    
+    ///when the returned NSKeyValueObservation is deinited or invalidated, it will stop observing
+    public func observe(
+            _ keyPaths: [PartialKeyPath<Self>],
+            options: NSKeyValueObservingOptions = [],
+            changeHandler: @escaping (Self, NSKeyValueObservedChange<Any>) -> Void)
+        -> NSKeyValueObservation {
+        let result = NSKeyValueObservation(object: self as! NSObject, keyPaths: keyPaths) { (obj, change) in
+            changeHandler(obj as! Self, change)
         }
         result.start(options)
         return result
